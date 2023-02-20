@@ -8,6 +8,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 #include <accel/endianness>
 
@@ -37,15 +38,48 @@ namespace accel
                 static int references[3] = { SEEK_CUR, SEEK_SET, SEEK_END };
                 return references[static_cast<std::size_t>(reference)];
             }
+
+            static std::size_t calculate_offset(std::size_t memory_size, std::size_t position, std::size_t offset, seek_references reference)
+            {
+                std::size_t new_offset;
+                if (reference == seek_references::begining)
+                {
+                    new_offset = offset;
+                }
+                else if (reference == seek_references::current)
+                {
+                    std::size_t current_offset = position;
+                    new_offset = current_offset + offset;
+                }
+                else // reference == seek_references::end
+                {
+                    std::size_t end_offset = memory_size - 1;
+                    new_offset = end_offset - offset;
+                }
+
+                if (new_offset >= memory_size || new_offset < 0)
+                    throw std::runtime_error("Seeking past memory limits.");
+
+                return new_offset;
+            }
         }
 
         class input_stream
         {
         public:
+            input_stream() = default;
+            virtual ~input_stream() = default;
+
+            input_stream(const input_stream&) = delete;
+            input_stream& operator=(const input_stream&) = delete;
+
+            input_stream(input_stream&&) = default;
+            input_stream& operator=(input_stream&&) = default;
+
             virtual void seek_read(std::size_t offset, seek_references reference) = 0;
-            virtual std::size_t read_position() = 0;
+            virtual std::size_t read_position() const = 0;
             virtual std::size_t read(char* data, std::size_t size) = 0;
-            virtual bool at_end() = 0;
+            virtual bool at_end() const = 0;
 
             template<typename T>
             input_stream& operator>>(T& data)
@@ -98,8 +132,17 @@ namespace accel
         class output_stream
         {
         public:
+            output_stream() = default;
+            virtual ~output_stream() = default;
+
+            output_stream(const output_stream&) = delete;
+            output_stream& operator=(const output_stream&) = delete;
+
+            output_stream(output_stream&&) = default;
+            output_stream& operator=(output_stream&&) = default;
+
             virtual void seek_write(std::size_t offset, seek_references reference) = 0;
-            virtual std::size_t write_position() = 0;
+            virtual std::size_t write_position() const = 0;
             virtual std::size_t write(const char* data, std::size_t size) = 0;
 
             template<typename T>
@@ -110,7 +153,7 @@ namespace accel
             }
 
             template<endianness::endiannesses Endianness, typename T>
-            std::size_t write_object(const T object)
+            std::size_t write_object(T object)
             {
                 endianness::swap_endianness<endianness::endiannesses::host_endian, Endianness>(object);
                 auto size = write(reinterpret_cast<const char*>(&object), sizeof(object));
@@ -120,13 +163,13 @@ namespace accel
             }
 
             template<typename T>
-            std::size_t write_object_le(const T object)
+            std::size_t write_object_le(T object)
             {
                 return write_object<endianness::endiannesses::little_endian>(object);
             }
 
             template<typename T>
-            std::size_t write_object_be(const T object)
+            std::size_t write_object_be(T object)
             {
                 return write_object<endianness::endiannesses::big_endian>(object);
             }
@@ -179,7 +222,7 @@ namespace accel
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t read_position() override
+            std::size_t read_position() const override
             {
                 return ftell(m_file);
             }
@@ -192,7 +235,7 @@ namespace accel
                 return read;
             }
 
-            bool at_end()
+            bool at_end() const
             {
                 return feof(m_file);
             }
@@ -223,7 +266,7 @@ namespace accel
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t write_position() override
+            std::size_t write_position() const override
             {
                 return ftell(m_file);
             }
@@ -259,7 +302,7 @@ namespace accel
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t read_position() override
+            std::size_t read_position() const override
             {
                 return ftell(m_file);
             }
@@ -269,13 +312,18 @@ namespace accel
                 return fread(data, 1, size, m_file);
             }
 
+            bool at_end() const
+            {
+                return feof(m_file);
+            }
+
             void seek_write(std::size_t offset, seek_references reference) override
             {
                 if (fseek(m_file, offset, details::get_seek_reference(reference)) != 0)
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t write_position() override
+            std::size_t write_position() const override
             {
                 return ftell(m_file);
             }
@@ -289,15 +337,14 @@ namespace accel
             FILE* m_file;
         };
 
-        template<typename T = char>
         class memory_input_stream : public input_stream
         {
         public:
-            memory_input_stream(const std::vector<T>& memory) : 
+            memory_input_stream(const std::vector<char>& memory) : 
                 m_memory(memory),
                 m_read_position(0) {}
 
-            memory_input_stream(std::vector<T>&& memory) : 
+            memory_input_stream(std::vector<char>&& memory) : 
                 m_memory(std::move(memory)),
                 m_read_position(0) {}
             
@@ -305,130 +352,92 @@ namespace accel
 
             void seek_read(std::size_t offset, seek_references reference) override
             {
-                if (reference == seek_references::begining)
-                {
-                    if (offset < 0 || offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_read_position = offset;
-                }
-                else if (reference == seek_references::current)
-                {
-                    std::size_t new_offset = m_read_position + offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_read_position = new_offset;
-                }
-                else 
-                {
-                    std::size_t new_offset = m_memory.size() - offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_read_position = new_offset;
-                }
+                m_read_position = details::calculate_offset(m_memory.size(), m_read_position, offset, reference);
             }
 
-            std::size_t read_position() override
+            std::size_t read_position() const override
             {
                 return m_read_position;
             }
 
-            std::size_t read(T* data, std::size_t size) override
+            std::size_t read(char* data, std::size_t size) override
             {
-                std::ptrdiff_t overread = (m_read_position + size) - m_memory.size();
-                if (overread > 0)
-                    size -= overread;
+                if (m_read_position >= m_memory.size())
+                    return 0;
 
-                auto begin = m_memory.begin() + m_read_position;
-                auto end = begin + size;
-                std::copy(begin, end, data);
+                std::size_t remaining = m_memory.size() - m_read_position;
+                std::size_t n = std::min(size, remaining);
+                std::memcpy(data, m_memory.data() + m_read_position, n);
                 
-                m_read_position += size;
+                m_read_position += n;
 
-                return size;
+                return n;
             }
 
-            bool at_end()
+            bool at_end() const
             {
                 return m_read_position == m_memory.size();
             }
 
         private:
             std::size_t m_read_position;
-            std::vector<T> m_memory;
+            std::vector<char> m_memory;
         };
 
-        template<typename T = char>
         class memory_output_stream : public output_stream
         {
         public:
-            memory_output_stream() :
-                m_write_position(0) {}
-            
+            memory_output_stream(std::size_t initial_capacity = 1024) :
+                m_write_position(0)
+            {
+                m_memory.reserve(initial_capacity);
+            }
+
             ~memory_output_stream() = default;
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
-                if (reference == seek_references::begining)
-                {
-                    if (offset < 0 || offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_write_position = offset;
-                }
-                else if (reference == seek_references::current)
-                {
-                    std::size_t new_offset = m_write_position + offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_write_position = new_offset;
-                }
-                else 
-                {
-                    std::size_t new_offset = m_memory.size() - offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_write_position = new_offset;
-                }
+                m_write_position = details::calculate_offset(m_memory.size(), m_write_position, offset, reference);
             }
 
-            std::size_t write_position() override
+            std::size_t write_position() const override
             {
                 return m_write_position;
             }
 
             std::size_t write(const char* data, std::size_t size) override
             {
-                std::size_t current = 0;
-                while (current < size)
+                std::size_t available = m_memory.size() - m_write_position;
+                if (size <= available) 
                 {
-                    std::size_t write_offset = m_write_position + current;
-                    if (write_offset < m_memory.size())
-                        m_memory[write_offset] = data[current];
-                    else
-                        m_memory.push_back(data[current]);
-                    current++;
+                    std::memcpy(m_memory.data() + m_write_position, data, size);
+                    m_write_position += size;
+                    return size;
+                } 
+                else 
+                {
+                    std::memcpy(m_memory.data() + m_write_position, data, available);
+                    m_memory.insert(m_memory.end(), data + available, data + size);
+                    m_write_position += size;
+                    return size;
                 }
-
-                m_write_position += current;
-
-                return current;
             }
 
-            T* data()
+            const char* data() const
             {
                 return m_memory.data();
             }
 
-            std::size_t size()
+            std::size_t size() const
             {
                 return m_memory.size();
             }
 
         private:
             std::size_t m_write_position;
-            std::vector<T> m_memory;
+            std::vector<char> m_memory;
         };
 
-        template<typename T = char>
         class memory_stream : public stream
         {
         public:
@@ -436,12 +445,12 @@ namespace accel
                 m_write_position(0),
                 m_read_position(0) {}
 
-            memory_stream(const std::vector<T>& memory) : 
+            memory_stream(const std::vector<char>& memory) : 
                 m_memory(memory),
                 m_write_position(0),
                 m_read_position(0) {}
 
-            memory_stream(std::vector<T>&& memory) : 
+            memory_stream(std::vector<char>&& memory) : 
                 m_memory(std::move(memory)),
                 m_write_position(0),
                 m_read_position(0) {}
@@ -450,34 +459,15 @@ namespace accel
 
             void seek_read(std::size_t offset, seek_references reference) override
             {
-                if (reference == seek_references::begining)
-                {
-                    if (offset < 0 || offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_read_position = offset;
-                }
-                else if (reference == seek_references::current)
-                {
-                    std::size_t new_offset = m_read_position + offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_read_position = new_offset;
-                }
-                else 
-                {
-                    std::size_t new_offset = m_memory.size() - offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_read_position = new_offset;
-                }
+                m_read_position = details::calculate_offset(m_memory.size(), m_read_position, offset, reference);
             }
 
-            std::size_t read_position() override
+            std::size_t read_position() const override
             {
                 return m_read_position;
             }
 
-            std::size_t read(T* data, std::size_t size) override
+            std::size_t read(char* data, std::size_t size) override
             {
                 std::ptrdiff_t overread = (m_read_position + size) - m_memory.size();
                 if (overread > 0)
@@ -499,57 +489,38 @@ namespace accel
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
-                if (reference == seek_references::begining)
-                {
-                    if (offset < 0 || offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_write_position = offset;
-                }
-                else if (reference == seek_references::current)
-                {
-                    std::size_t new_offset = m_write_position + offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_write_position = new_offset;
-                }
-                else 
-                {
-                    std::size_t new_offset = m_memory.size() - offset;
-                    if (new_offset < 0 || new_offset >= m_memory.size())
-                        throw std::runtime_error("Seeking past memory limits.");
-                    m_write_position = new_offset;
-                }
+                m_write_position = details::calculate_offset(m_memory.size(), m_write_position, offset, reference);
             }
 
-            std::size_t write_position() override
+            std::size_t write_position() const override
             {
                 return m_write_position;
             }
 
             std::size_t write(const char* data, std::size_t size) override
             {
-                std::size_t current = 0;
-                while (current < size)
+                std::size_t available = m_memory.size() - m_write_position;
+                if (size <= available) 
                 {
-                    std::size_t write_offset = m_write_position + current;
-                    if (write_offset < m_memory.size())
-                        m_memory[write_offset] = data[current];
-                    else
-                        m_memory.push_back(data[current]);
-                    current++;
+                    std::memcpy(m_memory.data() + m_write_position, data, size);
+                    m_write_position += size;
+                    return size;
+                } 
+                else 
+                {
+                    std::memcpy(m_memory.data() + m_write_position, data, available);
+                    m_memory.insert(m_memory.end(), data + available, data + size);
+                    m_write_position += size;
+                    return size;
                 }
-
-                m_write_position += current;
-
-                return current;
             }
 
-            T* data()
+            const char* data() const
             {
                 return m_memory.data();
             }
 
-            std::size_t size()
+            std::size_t size() const
             {
                 return m_memory.size();
             }
@@ -557,7 +528,7 @@ namespace accel
         private:
             std::size_t m_write_position;
             std::size_t m_read_position;
-            std::vector<T> m_memory;
+            std::vector<char> m_memory;
         };
 
     }
