@@ -12,10 +12,11 @@ if(NOT DEFINED ACCEL_MODULES_FOLDER)
     set(ACCEL_MODULES_FOLDER "${CMAKE_SOURCE_DIR}/external")
 endif()
 
-set(ADDITIONAL_LIBRARIES accel-endianness)
+set(ADDITIONAL_LIBRARIES accel-endianness accel-macros)
 
 include(cmake/FindModule.cmake)
 add_accel_module(accel-endianness)
+add_accel_module(accel-macros)
 
 add_library(accel-stream INTERFACE)
 target_include_directories(accel-stream INTERFACE "include/")

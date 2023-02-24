@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include <accel/endianness>
+#include <accel/macros>
 
 namespace accel
 {
@@ -70,11 +71,8 @@ namespace accel
             input_stream() = default;
             virtual ~input_stream() = default;
 
-            input_stream(const input_stream&) = delete;
-            input_stream& operator=(const input_stream&) = delete;
-
-            input_stream(input_stream&&) = default;
-            input_stream& operator=(input_stream&&) = default;
+            ACC_NON_COPYABLE(input_stream);
+            ACC_DEFAULT_MOVABLE(input_stream);
 
             virtual void seek_read(std::size_t offset, seek_references reference) = 0;
             virtual std::size_t read_position() const = 0;
@@ -135,11 +133,8 @@ namespace accel
             output_stream() = default;
             virtual ~output_stream() = default;
 
-            output_stream(const output_stream&) = delete;
-            output_stream& operator=(const output_stream&) = delete;
-
-            output_stream(output_stream&&) = default;
-            output_stream& operator=(output_stream&&) = default;
+            ACC_NON_COPYABLE(output_stream);
+            ACC_DEFAULT_MOVABLE(output_stream);
 
             virtual void seek_write(std::size_t offset, seek_references reference) = 0;
             virtual std::size_t write_position() const = 0;
@@ -216,6 +211,9 @@ namespace accel
                     fclose(m_file);
             }
 
+            ACC_NON_COPYABLE(file_input_stream);
+            ACC_DEFAULT_MOVABLE(file_input_stream);
+
             void seek_read(std::size_t offset, seek_references reference) override
             {
                 if (fseek(m_file, offset, details::get_seek_reference(reference)) != 0)
@@ -235,7 +233,7 @@ namespace accel
                 return read;
             }
 
-            bool at_end() const
+            bool at_end() const override
             {
                 return feof(m_file);
             }
@@ -259,6 +257,9 @@ namespace accel
                 if (m_file)
                     fclose(m_file);
             }
+
+            ACC_NON_COPYABLE(file_output_stream);
+            ACC_DEFAULT_MOVABLE(file_output_stream);
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
@@ -294,7 +295,10 @@ namespace accel
             {
                 if (m_file)
                     fclose(m_file);
-            }     
+            }
+
+            ACC_NON_COPYABLE(file_stream);
+            ACC_DEFAULT_MOVABLE(file_stream);
 
             void seek_read(std::size_t offset, seek_references reference) override
             {
@@ -312,7 +316,7 @@ namespace accel
                 return fread(data, 1, size, m_file);
             }
 
-            bool at_end() const
+            bool at_end() const override
             {
                 return feof(m_file);
             }
@@ -350,6 +354,9 @@ namespace accel
             
             ~memory_input_stream() = default;
 
+            ACC_NON_COPYABLE(memory_input_stream);
+            ACC_DEFAULT_MOVABLE(memory_input_stream);
+
             void seek_read(std::size_t offset, seek_references reference) override
             {
                 m_read_position = details::calculate_offset(m_memory.size(), m_read_position, offset, reference);
@@ -374,7 +381,7 @@ namespace accel
                 return n;
             }
 
-            bool at_end() const
+            bool at_end() const override
             {
                 return m_read_position == m_memory.size();
             }
@@ -394,6 +401,9 @@ namespace accel
             }
 
             ~memory_output_stream() = default;
+
+            ACC_NON_COPYABLE(memory_output_stream);
+            ACC_DEFAULT_MOVABLE(memory_output_stream);
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
@@ -457,6 +467,9 @@ namespace accel
             
             ~memory_stream() = default;
 
+            ACC_NON_COPYABLE(memory_stream);
+            ACC_DEFAULT_MOVABLE(memory_stream);
+
             void seek_read(std::size_t offset, seek_references reference) override
             {
                 m_read_position = details::calculate_offset(m_memory.size(), m_read_position, offset, reference);
@@ -482,7 +495,7 @@ namespace accel
                 return size;
             }
 
-            bool at_end()
+            bool at_end() const override
             {
                 return m_read_position == m_memory.size();
             }
