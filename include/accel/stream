@@ -370,7 +370,7 @@ namespace accel
 
             std::size_t write(const char* data, std::size_t size) override
             {
-                return fwrite(data, size, 1, m_file);
+                return fwrite(data, 1, size, m_file);
             }
 
         private:
