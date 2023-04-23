@@ -110,7 +110,7 @@ namespace accel
         };
 
         template<>
-        input_stream& input_stream::operator>><std::string>(std::string& data)
+        inline input_stream& input_stream::operator>><std::string>(std::string& data)
         {
             std::size_t current_size = 0;
             
@@ -171,7 +171,7 @@ namespace accel
         };
 
         template<>
-        output_stream& output_stream::operator<<<const char*>(const char* data)
+        inline output_stream& output_stream::operator<<<const char*>(const char* data)
         {
             std::size_t current_size = 0;
             
@@ -188,7 +188,7 @@ namespace accel
         }
 
         template<>
-        output_stream& output_stream::operator<<<std::string>(std::string data)
+        inline output_stream& output_stream::operator<<<std::string>(std::string data)
         {
             return operator<<<const char*>(data.c_str());
         }
