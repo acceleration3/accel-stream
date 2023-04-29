@@ -409,7 +409,7 @@ namespace accel
                     return 0;
 
                 std::size_t remaining = m_memory.size() - m_read_position;
-                std::size_t n = std::min(size, remaining);
+                std::size_t n = (std::min)(size, remaining);
                 std::memcpy(data, m_memory.data() + m_read_position, n);
                 
                 m_read_position += n;
