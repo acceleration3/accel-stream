@@ -10,7 +10,7 @@ int main(int argc, char* argv[])
 {
 	// File output stream
 	{
-		stream::file_output_stream stream("test.bin", stream::file_mode::binary);
+		stream::file_output_stream stream("test.bin", stream::file_modes::binary);
 		for (std::size_t i = 0; i < 30; i++)
 			stream << 3;
 
@@ -19,7 +19,7 @@ int main(int argc, char* argv[])
 
 	// File input stream
 	{
-		stream::file_input_stream stream("test.bin", stream::file_mode::binary);
+		stream::file_input_stream stream("test.bin", stream::file_modes::binary);
 
 		for (std::size_t i = 0; i < 30; i++)
 		{

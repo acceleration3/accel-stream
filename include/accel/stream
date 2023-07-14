@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include <accel/endianness>
+#include <accel/endianess>
 #include <accel/macros>
 
 namespace accel
@@ -85,26 +85,26 @@ namespace accel
                 return *this;
             }
 
-            template<endianness::endiannesses Endianness = endianness::endiannesses::host_endian, typename T>
+            template<endianess::endianesses Endianess = endianess::endianesses::host_endian, typename T>
             std::size_t read_object(T& object)
             {
                 auto size = read(reinterpret_cast<std::uint8_t*>(&object), sizeof(object));
                 if (size != sizeof(object))
                     return size;
-                endianness::swap_endianness<endianness::endiannesses::host_endian, Endianness>(object);
+                endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(object);
                 return size;
             }
 
             template<typename T>
             std::size_t read_object_le(T& object)
             {
-                return read_object<endianness::endiannesses::little_endian>(object);
+                return read_object<endianess::endianesses::little_endian>(object);
             }
 
             template<typename T>
             std::size_t read_object_be(T& object)
             {
-                return read_object<endianness::endiannesses::big_endian>(object);
+                return read_object<endianess::endianesses::big_endian>(object);
             }
 
         protected:
@@ -148,31 +148,31 @@ namespace accel
                 return *this;
             }
 
-            template<endianness::endiannesses Endianness, typename T>
+            template<endianess::endianesses Endianess, typename T>
             std::size_t write_object(const T& object)
             {
-                endianness::swap_endianness<endianness::endiannesses::host_endian, Endianness>(object);
-                return write(reinterpret_cast<const std::uint8_t*>(&object), sizeof(object));
+                T temp = object;
+                endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(temp);
+                return write(reinterpret_cast<const std::uint8_t*>(&temp), sizeof(temp));
             }
 
             template<typename T>
             std::size_t write_object_le(const T& object)
             {
-                return write_object<endianness::endiannesses::little_endian>(object);
+                return write_object<endianess::endianesses::little_endian>(object);
             }
 
             template<typename T>
             std::size_t write_object_be(const T& object)
             {
-                return write_object<endianness::endiannesses::big_endian>(object);
+                return write_object<endianess::endianesses::big_endian>(object);
             }
 
         protected:
             output_stream() = default;
         };
 
-        template<>
-        inline output_stream& output_stream::operator<<<const std::uint8_t*>(const std::uint8_t* data)
+        template<> inline output_stream& output_stream::operator<<<const std::uint8_t*>(const std::uint8_t* data)
         {
             std::size_t current_size = 0;
             
@@ -188,10 +188,14 @@ namespace accel
             return *this;
         }
 
-        template<>
-        inline output_stream& output_stream::operator<<<std::string>(std::string data)
+        template<> inline output_stream& output_stream::operator<<<std::string>(std::string data)
         {
             return operator<<<const std::uint8_t*>(reinterpret_cast<const std::uint8_t*>(data.c_str()));
+        }
+
+        template<> inline output_stream& output_stream::operator<<<const char*>(const char* data)
+        {
+            return operator<<(std::string(data));
         }
 
         class stream : public input_stream, public output_stream {};
