@@ -12,8 +12,6 @@ int main(int argc, char* argv[])
 		stream::file_output_stream stream("test.bin", stream::file_modes::binary);
 		for (std::size_t i = 0; i < 30; i++)
 			stream << 3;
-
-		stream << "This is a test string.";
 	}
 
 	{
@@ -25,10 +23,6 @@ int main(int argc, char* argv[])
 			stream >> value;
 			assert(value == 3);			
 		}
-
-		std::string test;
-		stream >> test;
-		assert(test == "This is a test string.");
 	}
 
 	{

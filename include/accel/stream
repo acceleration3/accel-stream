@@ -132,24 +132,6 @@ namespace accel
             input_stream() = default;
         };
 
-        template<>
-        inline input_stream& input_stream::operator>><std::string>(std::string& data)
-        {
-            std::size_t current_size = 0;
-            
-            while (current_size < details::max_string_size)
-            {
-                char new_char = 0;
-                auto read_bytes = read(reinterpret_cast<std::uint8_t*>(&new_char), sizeof(char));
-                current_size++;
-                if (new_char == 0 || read_bytes == 0 || at_read_end())
-                    break;
-                data.push_back(new_char);
-            }
-
-            return *this;
-        }
-
         class output_stream
         {
         public:
@@ -157,13 +139,13 @@ namespace accel
 
             virtual void seek_write(std::size_t offset, seek_references reference) = 0;
             virtual std::size_t get_write_position() const = 0;
-            virtual std::size_t write(const std::uint8_t* data, std::size_t size) = 0;
+            virtual std::size_t write(const byte_t* data, std::size_t size) = 0;
             virtual bool at_write_end() const = 0;
 
             template<typename T>
-            output_stream& operator<<(const T data)
+            output_stream& operator<<(const T& data)
             {
-                write(reinterpret_cast<const std::uint8_t*>(&data), sizeof(data));
+                write(reinterpret_cast<const byte_t*>(&data), sizeof(data));
                 return *this;
             }
 
@@ -172,7 +154,7 @@ namespace accel
             {
                 T temp = object;
                 endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(temp);
-                return write(reinterpret_cast<const std::uint8_t*>(&temp), sizeof(temp));
+                return write(reinterpret_cast<const byte_t*>(&temp), sizeof(temp));
             }
 
             template<typename T>
@@ -190,32 +172,6 @@ namespace accel
         protected:
             output_stream() = default;
         };
-
-        template<> inline output_stream& output_stream::operator<<<const std::uint8_t*>(const std::uint8_t* data)
-        {
-            std::size_t current_size = 0;
-            
-            while (current_size < details::max_string_size)
-            {
-                char new_char = data[current_size];
-                current_size++;
-                auto written_bytes = write(reinterpret_cast<std::uint8_t*>(&new_char), sizeof(char));
-                if (new_char == 0 || written_bytes == 0)
-                    break;
-            }
-
-            return *this;
-        }
-
-        template<> inline output_stream& output_stream::operator<<<std::string>(std::string data)
-        {
-            return operator<<<const std::uint8_t*>(reinterpret_cast<const std::uint8_t*>(data.c_str()));
-        }
-
-        template<> inline output_stream& output_stream::operator<<<const char*>(const char* data)
-        {
-            return operator<<(std::string(data));
-        }
 
         class stream : public input_stream, public output_stream {};
 
@@ -264,7 +220,7 @@ namespace accel
                 return details::ftell_64(m_file);
             }
 
-            std::size_t read(std::uint8_t* data, std::size_t size) override
+            std::size_t read(byte_t* data, std::size_t size) override
             {
                 std::ptrdiff_t read = fread(data, 1, size, m_file);
                 if (read < 0)
@@ -326,7 +282,7 @@ namespace accel
                 return details::ftell_64(m_file);
             }
 
-            std::size_t write(const std::uint8_t* data, std::size_t size) override
+            std::size_t write(const byte_t* data, std::size_t size) override
             {
                 return fwrite(data, 1, size, m_file);
             }
@@ -345,7 +301,7 @@ namespace accel
         public:
             file_stream() = default;
 
-            file_stream(const utf8::string path, file_modes mode)
+            file_stream(const utf8::string& path, file_modes mode)
             {
                 fclose(details::fopen_utf8(path, "a+"));
                 m_file = details::fopen_utf8(path, mode == file_modes::binary ? "r+b" : "r+t");
@@ -386,7 +342,7 @@ namespace accel
                 return details::ftell_64(m_file);
             }
 
-            std::size_t read(std::uint8_t* data, std::size_t size) override
+            std::size_t read(byte_t* data, std::size_t size) override
             {
                 return fread(data, 1, size, m_file);
             }
@@ -413,7 +369,7 @@ namespace accel
                 return details::ftell_64(m_file);
             }
 
-            std::size_t write(const std::uint8_t* data, std::size_t size) override
+            std::size_t write(const byte_t* data, std::size_t size) override
             {
                 return fwrite(data, 1, size, m_file);
             }
@@ -560,7 +516,7 @@ namespace accel
                 return m_write_position;
             }
 
-            std::size_t write(const std::uint8_t* data, std::size_t size) override
+            std::size_t write(const byte_t* data, std::size_t size) override
             {
                 if (m_write_position >= m_size)
                     return 0;
@@ -620,7 +576,7 @@ namespace accel
                 return m_input_stream.get_read_position();
             }
 
-            std::size_t read(std::uint8_t* data, std::size_t size) override
+            std::size_t read(byte_t* data, std::size_t size) override
             {
                 return m_input_stream.read(data, size);
             }
@@ -645,7 +601,7 @@ namespace accel
                 return m_output_stream.get_write_position();
             }
 
-            std::size_t write(const std::uint8_t* data, std::size_t size) override
+            std::size_t write(const byte_t* data, std::size_t size) override
             {
                 return m_output_stream.write(data, size);
             }
