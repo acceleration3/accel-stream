@@ -1,26 +1,29 @@
 #ifndef ACCEL_STREAM_HEADER
 #define ACCEL_STREAM_HEADER
 
-#include <string>
 #include <vector>
 #include <stdexcept>
 
-#include <cctype>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
+
+#define _FILE_OFFSET_BITS 64
+#include <cstdio>
 
 #include <accel/endianess>
 #include <accel/macros>
+#include <accel/utf8>
 
 namespace accel
 {
+    using byte_t = BYTE_TYPE;
+    
     namespace stream
-    {
+    {    
         enum class seek_references
 	    {
-		    current,
 		    begining,
+		    current,
 		    end
 	    };
 
@@ -34,15 +37,9 @@ namespace accel
         {
             static constexpr std::size_t max_string_size = 1024;
 
-            static int get_seek_reference(seek_references reference)
+            static inline std::size_t calculate_offset(std::size_t memory_size, std::size_t position, std::size_t offset, seek_references reference)
             {
-                static int references[3] = { SEEK_CUR, SEEK_SET, SEEK_END };
-                return references[static_cast<std::size_t>(reference)];
-            }
-
-            static std::size_t calculate_offset(std::size_t memory_size, std::size_t position, std::size_t offset, seek_references reference)
-            {
-                std::size_t new_offset;
+                std::size_t new_offset = 0;
                 if (reference == seek_references::begining)
                 {
                     new_offset = offset;
@@ -63,6 +60,33 @@ namespace accel
 
                 return new_offset;
             }
+        
+            static inline FILE* fopen_utf8(const utf8::string& path, const utf8::string& mode)
+            {
+#if defined(PLATFORM_WINDOWS)
+                return _wfopen(path.to_wstring().c_str(), mode.to_wstring().c_str());
+#else
+                return fopen(path.to_string().c_str(), mode.to_string().c_str());
+#endif
+            }
+
+            static inline std::size_t ftell_64(FILE* file)
+            {
+#if defined(COMPILER_MSVC)
+                return _ftelli64(file);
+#else
+                return ftello64(file);
+#endif
+            }
+
+            static inline std::size_t fseek_64(FILE* file, std::size_t offset, int origin)
+            {
+#if defined(COMPILER_MSVC)
+                return _fseeki64(file, offset, origin);
+#else
+                return fseeko64(file, offset, origin);
+#endif
+            }
         }
 
         class input_stream
@@ -70,25 +94,22 @@ namespace accel
         public:
             virtual ~input_stream() = default;
 
-            ACC_NON_COPYABLE(input_stream);
-            ACC_DEFAULT_MOVABLE(input_stream);
-
             virtual void seek_read(std::size_t offset, seek_references reference) = 0;
-            virtual std::size_t read_position() const = 0;
-            virtual std::size_t read(std::uint8_t* data, std::size_t size) = 0;
-            virtual bool at_end() const = 0;
+            virtual std::size_t get_read_position() const = 0;
+            virtual std::size_t read(byte_t* data, std::size_t size) = 0;
+            virtual bool at_read_end() const = 0;
 
             template<typename T>
             input_stream& operator>>(T& data)
             {
-                read(reinterpret_cast<std::uint8_t*>(&data), sizeof(data));
+                read(reinterpret_cast<byte_t*>(&data), sizeof(data));
                 return *this;
             }
 
             template<endianess::endianesses Endianess = endianess::endianesses::host_endian, typename T>
             std::size_t read_object(T& object)
             {
-                auto size = read(reinterpret_cast<std::uint8_t*>(&object), sizeof(object));
+                auto size = read(reinterpret_cast<byte_t*>(&object), sizeof(object));
                 if (size != sizeof(object))
                     return size;
                 endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(object);
@@ -121,7 +142,7 @@ namespace accel
                 char new_char = 0;
                 auto read_bytes = read(reinterpret_cast<std::uint8_t*>(&new_char), sizeof(char));
                 current_size++;
-                if (new_char == 0 || read_bytes == 0 || at_end())
+                if (new_char == 0 || read_bytes == 0 || at_read_end())
                     break;
                 data.push_back(new_char);
             }
@@ -134,12 +155,10 @@ namespace accel
         public:
             virtual ~output_stream() = default;
 
-            ACC_NON_COPYABLE(output_stream);
-            ACC_DEFAULT_MOVABLE(output_stream);
-
             virtual void seek_write(std::size_t offset, seek_references reference) = 0;
-            virtual std::size_t write_position() const = 0;
+            virtual std::size_t get_write_position() const = 0;
             virtual std::size_t write(const std::uint8_t* data, std::size_t size) = 0;
+            virtual bool at_write_end() const = 0;
 
             template<typename T>
             output_stream& operator<<(const T data)
@@ -205,9 +224,11 @@ namespace accel
         public:
             file_input_stream() = default;
 
-            file_input_stream(std::string path, file_modes mode)
+            file_input_stream(const utf8::string& path, file_modes mode)
             {
-                open(path, mode);
+                m_file = details::fopen_utf8(path, mode == file_modes::binary ? "rb" : "rt");
+                if (!m_file)
+                    throw std::runtime_error("Failed to open file.");
             }
             
             ~file_input_stream()
@@ -231,22 +252,16 @@ namespace accel
                 return *this;
             }
 
-            void open(std::string path, file_modes mode)
-            {
-                m_file = fopen(path.c_str(), mode == file_modes::binary ? "rb" : "rt");
-                if (!m_file)
-                    throw std::runtime_error("Failed to open file.");
-            }
-
             void seek_read(std::size_t offset, seek_references reference) override
             {
-                if (fseek(m_file, offset, details::get_seek_reference(reference)) != 0)
+                int whence = static_cast<int>(reference);
+                if (details::fseek_64(m_file, offset, whence) != 0)
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t read_position() const override
+            std::size_t get_read_position() const override
             {
-                return ftell(m_file);
+                return details::ftell_64(m_file);
             }
 
             std::size_t read(std::uint8_t* data, std::size_t size) override
@@ -257,7 +272,7 @@ namespace accel
                 return read;
             }
 
-            bool at_end() const override
+            bool at_read_end() const override
             {
                 return feof(m_file);
             }
@@ -271,9 +286,11 @@ namespace accel
         public:
             file_output_stream() = default;
 
-            file_output_stream(std::string path, file_modes mode)
+            file_output_stream(const utf8::string& path, file_modes mode)
             {
-                open(path, mode);
+                m_file = details::fopen_utf8(path, mode == file_modes::binary ? "wb" : "wt");
+                if (!m_file)
+                    throw std::runtime_error("Failed to open file.");
             }
             
             ~file_output_stream()
@@ -297,27 +314,26 @@ namespace accel
                 return *this;
             }
 
-            void open(std::string path, file_modes mode)
-            {
-                m_file = fopen(path.c_str(), mode == file_modes::binary ? "wb" : "wt");
-                if (!m_file)
-                    throw std::runtime_error("Failed to open file.");
-            }
-
             void seek_write(std::size_t offset, seek_references reference) override
             {
-                if (fseek(m_file, offset, details::get_seek_reference(reference)) != 0)
+                int whence = static_cast<int>(reference);
+                if (details::fseek_64(m_file, offset, whence) != 0)
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t write_position() const override
+            std::size_t get_write_position() const override
             {
-                return ftell(m_file);
+                return details::ftell_64(m_file);
             }
 
             std::size_t write(const std::uint8_t* data, std::size_t size) override
             {
                 return fwrite(data, 1, size, m_file);
+            }
+
+            bool at_write_end() const override
+            {
+                return feof(m_file);
             }
 
         private:
@@ -329,9 +345,12 @@ namespace accel
         public:
             file_stream() = default;
 
-            file_stream(std::string path, file_modes mode)
+            file_stream(const utf8::string path, file_modes mode)
             {
-                open(path, mode);
+                fclose(details::fopen_utf8(path, "a+"));
+                m_file = details::fopen_utf8(path, mode == file_modes::binary ? "r+b" : "r+t");
+                if (!m_file)
+                    throw std::runtime_error("Failed to open file.");
             }
 
             ~file_stream()
@@ -355,23 +374,16 @@ namespace accel
                 return *this;
             }
 
-            void open(std::string path, file_modes mode)
-            {
-                fclose(fopen(path.c_str(), "a+"));
-                m_file = fopen(path.c_str(), mode == file_modes::binary ? "r+b" : "r+t");
-                if (!m_file)
-                    throw std::runtime_error("Failed to open file.");
-            }
-
             void seek_read(std::size_t offset, seek_references reference) override
             {
-                if (fseek(m_file, offset, details::get_seek_reference(reference)) != 0)
+                int whence = static_cast<int>(reference);
+                if (details::fseek_64(m_file, offset, whence) != 0)
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t read_position() const override
+            std::size_t get_read_position() const override
             {
-                return ftell(m_file);
+                return details::ftell_64(m_file);
             }
 
             std::size_t read(std::uint8_t* data, std::size_t size) override
@@ -379,20 +391,26 @@ namespace accel
                 return fread(data, 1, size, m_file);
             }
 
-            bool at_end() const override
+            bool at_read_end() const override
+            {
+                return feof(m_file);
+            }
+
+            bool at_write_end() const override
             {
                 return feof(m_file);
             }
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
-                if (fseek(m_file, offset, details::get_seek_reference(reference)) != 0)
+                int whence = static_cast<int>(reference);
+                if (details::fseek_64(m_file, offset, whence) != 0)
                     throw std::runtime_error("Failed to seek file");
             }
 
-            std::size_t write_position() const override
+            std::size_t get_write_position() const override
             {
-                return ftell(m_file);
+                return details::ftell_64(m_file);
             }
 
             std::size_t write(const std::uint8_t* data, std::size_t size) override
@@ -407,173 +425,266 @@ namespace accel
         class memory_input_stream : public input_stream
         {
         public:
-            memory_input_stream(const std::vector<char>& memory) : 
-                m_memory(memory),
-                m_read_position(0) {}
+            template<typename DataT, std::size_t Size>
+            memory_input_stream(const DataT(&data)[Size], std::size_t offset = 0) :
+                m_data(reinterpret_cast<const byte_t*>(data)),
+                m_size(Size),
+                m_read_position(offset) {}
 
-            memory_input_stream(std::vector<char>&& memory) : 
-                m_memory(std::move(memory)),
-                m_read_position(0) {}
-            
+            template<typename DataT>
+            memory_input_stream(const DataT data, std::size_t size, std::size_t offset = 0) :
+                m_data(reinterpret_cast<const byte_t*>(data)),
+                m_size(size),
+                m_read_position(offset) {}
+
+            memory_input_stream(const byte_t* data, std::size_t size, std::size_t offset = 0) : 
+                m_data(data),
+                m_size(size),
+                m_read_position(offset) {}
+
             ~memory_input_stream() = default;
 
-            ACC_NON_COPYABLE(memory_input_stream);
-            ACC_DEFAULT_MOVABLE(memory_input_stream);
+            ACC_DEFAULT_COPYABLE(memory_input_stream);
+
+            memory_input_stream(memory_input_stream&& other)
+            {
+                m_data = other.m_data;
+                m_read_position = other.m_read_position;
+                m_size = other.m_size;
+                other.m_data = nullptr;
+                other.m_read_position = 0;
+                other.m_size = 0;
+            }
+
+            memory_input_stream& operator=(memory_input_stream&& other)
+            {
+                m_data = other.m_data;
+                m_read_position = other.m_read_position;
+                m_size = other.m_size;
+                other.m_data = nullptr;
+                other.m_read_position = 0;
+                other.m_size = 0;
+                return *this;
+            }
 
             void seek_read(std::size_t offset, seek_references reference) override
             {
-                m_read_position = details::calculate_offset(m_memory.size(), m_read_position, offset, reference);
+                m_read_position = details::calculate_offset(m_size, m_read_position, offset, reference);
             }
 
-            std::size_t read_position() const override
+            std::size_t get_read_position() const override
             {
                 return m_read_position;
             }
 
-            std::size_t read(std::uint8_t* data, std::size_t size) override
+            std::size_t read(byte_t* data, std::size_t size) override
             {
-                if (m_read_position >= m_memory.size())
+                if (m_read_position >= m_size)
                     return 0;
 
-                std::size_t remaining = m_memory.size() - m_read_position;
+                std::size_t remaining = m_size - m_read_position;
                 std::size_t n = (std::min)(size, remaining);
-                std::memcpy(data, m_memory.data() + m_read_position, n);
+                std::memcpy(data, m_data + m_read_position, n);
                 
                 m_read_position += n;
 
                 return n;
             }
 
-            bool at_end() const override
+            bool at_read_end() const override
             {
-                return m_read_position == m_memory.size();
+                return m_read_position == m_size;
             }
 
+            std::size_t get_size() const { return m_size; }
+            const byte_t* get_data() const { return m_data; }
+        
         private:
+            const byte_t* m_data;
+            std::size_t m_size;
             std::size_t m_read_position;
-            std::vector<char> m_memory;
         };
 
         class memory_output_stream : public output_stream
         {
         public:
-            memory_output_stream(std::size_t initial_capacity = 1024) :
-                m_write_position(0)
-            {
-                m_memory.reserve(initial_capacity);
-            }
+            template<typename DataT, std::size_t Size>
+            memory_output_stream(DataT(&data)[Size], std::size_t offset = 0) :
+                m_data(reinterpret_cast<byte_t*>(data)),
+                m_size(Size),
+                m_write_position(offset) {}
+
+            template<typename DataT>
+            memory_output_stream(DataT data, std::size_t size, std::size_t offset = 0) :
+                m_data(reinterpret_cast<byte_t*>(data)),
+                m_size(size),
+                m_write_position(offset) {}
+
+            memory_output_stream(byte_t* data, std::size_t size, std::size_t offset = 0) :
+                m_data(data),
+                m_size(size),
+                m_write_position(offset) {}
 
             ~memory_output_stream() = default;
 
-            ACC_NON_COPYABLE(memory_output_stream);
-            ACC_DEFAULT_MOVABLE(memory_output_stream);
+            ACC_DEFAULT_COPYABLE(memory_output_stream);
+
+            memory_output_stream(memory_output_stream&& other)
+            {
+                m_data = other.m_data;
+                m_write_position = other.m_write_position;
+                m_size = other.m_size;
+                other.m_data = nullptr;
+                other.m_write_position = 0;
+                other.m_size = 0;
+            }
+
+            memory_output_stream& operator=(memory_output_stream&& other)
+            {
+                m_data = other.m_data;
+                m_write_position = other.m_write_position;
+                m_size = other.m_size;
+                other.m_data = nullptr;
+                other.m_write_position = 0;
+                other.m_size = 0;
+                return *this;
+            }
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
-                m_write_position = details::calculate_offset(m_memory.size(), m_write_position, offset, reference);
+                m_write_position = details::calculate_offset(m_size, m_write_position, offset, reference);
             }
 
-            std::size_t write_position() const override
+            std::size_t get_write_position() const override
             {
                 return m_write_position;
             }
 
             std::size_t write(const std::uint8_t* data, std::size_t size) override
             {
-                std::size_t available = m_memory.size() - m_write_position;
-                if (size <= available) 
-                {
-                    std::memcpy(m_memory.data() + m_write_position, data, size);
-                    m_write_position += size;
-                    return size;
-                } 
-                else 
-                {
-                    std::memcpy(m_memory.data() + m_write_position, data, available);
-                    m_memory.insert(m_memory.end(), data + available, data + size);
-                    m_write_position += size;
-                    return size;
-                }
+                if (m_write_position >= m_size)
+                    return 0;
+
+                std::size_t remaining = m_size - m_write_position;
+                std::size_t n = (std::min)(size, remaining);
+                std::memcpy(m_data + m_write_position, data, n);
+                
+                m_write_position += n;
+
+                return n;
             }
 
-            const std::uint8_t* data() const
+            bool at_write_end() const override
             {
-                return m_memory.data();
+                return m_write_position == m_size;
             }
 
-            std::size_t size() const
-            {
-                return m_memory.size();
-            }
+            std::size_t get_size() const { return m_size; }
+            byte_t* get_data() { return m_data; }
 
         private:
+            byte_t* m_data;
+            std::size_t m_size;
             std::size_t m_write_position;
-            std::vector<std::uint8_t> m_memory;
         };
 
         class memory_stream : public stream
         {
         public:
-            memory_stream() :
-                m_write_position(0),
-                m_read_position(0) {}
+            template<typename DataT, std::size_t Size>
+            memory_stream(DataT(&data)[Size], std::size_t read_offset = 0, std::size_t write_offset = 0) :
+                m_input_stream(data, Size, read_offset),
+                m_output_stream(data, Size, write_offset) {}
 
-            memory_stream(const std::vector<std::uint8_t>& memory) : 
-                m_memory(memory),
-                m_write_position(0),
-                m_read_position(0) {}
+            template<typename DataT>
+            memory_stream(DataT data, std::size_t size, std::size_t read_offset = 0, std::size_t write_offset = 0) :
+                m_input_stream(data, size, read_offset),
+                m_output_stream(data, size, write_offset) {}
 
-            memory_stream(std::vector<std::uint8_t>&& memory) : 
-                m_memory(std::move(memory)),
-                m_write_position(0),
-                m_read_position(0) {}
+            memory_stream(byte_t* data, std::size_t size, std::size_t read_offset = 0, std::size_t write_offset = 0) :
+                m_input_stream(data, size, read_offset),
+                m_output_stream(data, size, write_offset) {}
             
             ~memory_stream() = default;
 
-            ACC_NON_COPYABLE(memory_stream);
+            ACC_DEFAULT_COPYABLE(memory_stream);
             ACC_DEFAULT_MOVABLE(memory_stream);
 
             void seek_read(std::size_t offset, seek_references reference) override
             {
-                m_read_position = details::calculate_offset(m_memory.size(), m_read_position, offset, reference);
+                m_input_stream.seek_read(offset, reference);
             }
 
-            std::size_t read_position() const override
+            std::size_t get_read_position() const override
             {
-                return m_read_position;
+                return m_input_stream.get_read_position();
             }
 
             std::size_t read(std::uint8_t* data, std::size_t size) override
             {
-                std::ptrdiff_t overread = (m_read_position + size) - m_memory.size();
-                if (overread > 0)
-                    size -= overread;
-
-                auto begin = m_memory.begin() + m_read_position;
-                auto end = begin + size;
-                std::copy(begin, end, data);
-                
-                m_read_position += size;
-
-                return size;
+                return m_input_stream.read(data, size);
             }
 
-            bool at_end() const override
+            bool at_read_end() const override
             {
-                return m_read_position == m_memory.size();
+                return m_input_stream.at_read_end();
             }
+
+            bool at_write_end() const override
+            {
+                return m_output_stream.at_write_end();
+            }
+
+            void seek_write(std::size_t offset, seek_references reference) override
+            {
+                m_output_stream.seek_write(offset, reference);
+            }
+
+            std::size_t get_write_position() const override
+            {
+                return m_output_stream.get_write_position();
+            }
+
+            std::size_t write(const std::uint8_t* data, std::size_t size) override
+            {
+                return m_output_stream.write(data, size);
+            }
+
+            const byte_t* data() const { return m_input_stream.get_data(); }
+            byte_t* data() { return m_output_stream.get_data(); }
+
+            std::size_t size() const { return m_input_stream.get_size(); }
+
+        private:
+            memory_input_stream m_input_stream;
+            memory_output_stream m_output_stream;
+        };
+
+        class dynamic_output_stream : public output_stream
+        {
+        public:
+            dynamic_output_stream(std::size_t initial_capacity = 1024) :
+                m_write_position(0)
+            {
+                m_memory.reserve(initial_capacity);
+            }
+
+            ~dynamic_output_stream() = default;
+
+            ACC_DEFAULT_COPYABLE(dynamic_output_stream);
+            ACC_DEFAULT_MOVABLE(dynamic_output_stream);
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
                 m_write_position = details::calculate_offset(m_memory.size(), m_write_position, offset, reference);
             }
 
-            std::size_t write_position() const override
+            std::size_t get_write_position() const override
             {
                 return m_write_position;
             }
 
-            std::size_t write(const std::uint8_t* data, std::size_t size) override
+            std::size_t write(const byte_t* data, std::size_t size) override
             {
                 std::size_t available = m_memory.size() - m_write_position;
                 if (size <= available) 
@@ -591,22 +702,17 @@ namespace accel
                 }
             }
 
-            const std::uint8_t* data() const
-            {
-                return m_memory.data();
-            }
+            bool at_write_end() const override { return false; }
 
-            std::size_t size() const
-            {
-                return m_memory.size();
-            }
+            const byte_t* get_data() const { return m_memory.data(); }
+            byte_t* get_data() { return m_memory.data(); }
+
+            std::size_t get_size() const { return m_memory.size(); }
 
         private:
             std::size_t m_write_position;
-            std::size_t m_read_position;
-            std::vector<std::uint8_t> m_memory;
+            std::vector<byte_t> m_memory;
         };
-
     }
 }
 
