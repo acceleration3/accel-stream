@@ -102,18 +102,29 @@ namespace accel
             template<typename T>
             input_stream& operator>>(T& data)
             {
-                read(reinterpret_cast<byte_t*>(&data), sizeof(data));
+                read(reinterpret_cast<byte_t*>(&data), sizeof(T));
                 return *this;
             }
 
             template<endianess::endianesses Endianess = endianess::endianesses::host_endian, typename T>
             std::size_t read_object(T& object)
             {
-                auto size = read(reinterpret_cast<byte_t*>(&object), sizeof(object));
-                if (size != sizeof(object))
-                    return size;
+                auto size = read(reinterpret_cast<byte_t*>(&object), sizeof(T));
+                if (size != sizeof(T))
+                    return 0;
                 endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(object);
                 return size;
+            }
+
+            template<endianess::endianesses Endianess = endianess::endianesses::host_endian, typename T>
+            T read_object()
+            {
+                T result;
+                auto size = read(reinterpret_cast<byte_t*>(&result), sizeof(T));
+                if (size != sizeof(T))
+                    throw std::runtime_error("Failed to read object from stream.");
+                endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(result);
+                return result;
             }
 
             template<typename T>
@@ -123,9 +134,21 @@ namespace accel
             }
 
             template<typename T>
+            T read_object_le()
+            {
+                return read_object<endianess::endianesses::little_endian, T>();
+            }
+
+            template<typename T>
             std::size_t read_object_be(T& object)
             {
                 return read_object<endianess::endianesses::big_endian>(object);
+            }
+
+            template<typename T>
+            T read_object_be()
+            {
+                return read_object<endianess::endianesses::big_endian, T>();
             }
 
         protected:
@@ -157,16 +180,23 @@ namespace accel
                 return write(reinterpret_cast<const byte_t*>(&temp), sizeof(temp));
             }
 
-            template<typename T>
-            std::size_t write_object_le(const T& object)
+            template<endianess::endianesses Endianess, typename T>
+            std::size_t write_object(T&& object)
             {
-                return write_object<endianess::endianesses::little_endian>(object);
+                endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(object);
+                return write(reinterpret_cast<const byte_t*>(&object), sizeof(object));
             }
 
             template<typename T>
             std::size_t write_object_be(const T& object)
             {
                 return write_object<endianess::endianesses::big_endian>(object);
+            }
+
+            template<typename T>
+            std::size_t write_object_le(T&& object)
+            {
+                return write_object<endianess::endianesses::little_endian>(std::forward<T>(object));
             }
 
         protected:
@@ -384,7 +414,7 @@ namespace accel
             template<typename DataT, std::size_t Size>
             memory_input_stream(const DataT(&data)[Size], std::size_t offset = 0) :
                 m_data(reinterpret_cast<const byte_t*>(data)),
-                m_size(Size),
+                m_size(Size * sizeof(DataT)),
                 m_read_position(offset) {}
 
             template<typename DataT>
@@ -467,7 +497,7 @@ namespace accel
             template<typename DataT, std::size_t Size>
             memory_output_stream(DataT(&data)[Size], std::size_t offset = 0) :
                 m_data(reinterpret_cast<byte_t*>(data)),
-                m_size(Size),
+                m_size(Size * sizeof(DataT)),
                 m_write_position(offset) {}
 
             template<typename DataT>
@@ -549,8 +579,8 @@ namespace accel
         public:
             template<typename DataT, std::size_t Size>
             memory_stream(DataT(&data)[Size], std::size_t read_offset = 0, std::size_t write_offset = 0) :
-                m_input_stream(data, Size, read_offset),
-                m_output_stream(data, Size, write_offset) {}
+                m_input_stream(data, Size * sizeof(DataT), read_offset),
+                m_output_stream(data, Size * sizeof(DataT), write_offset) {}
 
             template<typename DataT>
             memory_stream(DataT data, std::size_t size, std::size_t read_offset = 0, std::size_t write_offset = 0) :
