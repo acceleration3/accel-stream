@@ -661,23 +661,31 @@ namespace accel
             memory_output_stream m_output_stream;
         };
 
-        class dynamic_output_stream : public output_stream
+        class vector_output_stream : public output_stream
         {
         public:
-            dynamic_output_stream(std::size_t initial_capacity = 1024) :
-                m_write_position(0)
+            vector_output_stream(std::size_t initial_capacity = 1024, std::size_t write_position = 0) :
+                m_write_position(write_position)
             {
-                m_memory.reserve(initial_capacity);
+                m_vector.reserve(initial_capacity);
             }
 
-            ~dynamic_output_stream() = default;
+            vector_output_stream(const std::vector<byte_t>& vector, std::size_t write_position = 0) :
+                m_write_position(write_position),
+                m_vector(vector) {}
 
-            ACC_DEFAULT_COPYABLE(dynamic_output_stream);
-            ACC_DEFAULT_MOVABLE(dynamic_output_stream);
+            vector_output_stream(std::vector<byte_t>&& vector, std::size_t write_position = 0) :
+                m_write_position(write_position),
+                m_vector(std::move(vector)) {}
+
+            ~vector_output_stream() = default;
+
+            ACC_DEFAULT_COPYABLE(vector_output_stream);
+            ACC_DEFAULT_MOVABLE(vector_output_stream);
 
             void seek_write(std::size_t offset, seek_references reference) override
             {
-                m_write_position = details::calculate_offset(m_memory.size(), m_write_position, offset, reference);
+                m_write_position = details::calculate_offset(m_vector.size(), m_write_position, offset, reference);
             }
 
             std::size_t get_write_position() const override
@@ -687,17 +695,17 @@ namespace accel
 
             std::size_t write(const byte_t* data, std::size_t size) override
             {
-                std::size_t available = m_memory.size() - m_write_position;
+                std::size_t available = m_vector.size() - m_write_position;
                 if (size <= available) 
                 {
-                    std::memcpy(m_memory.data() + m_write_position, data, size);
+                    std::memcpy(m_vector.data() + m_write_position, data, size);
                     m_write_position += size;
                     return size;
                 } 
                 else 
                 {
-                    std::memcpy(m_memory.data() + m_write_position, data, available);
-                    m_memory.insert(m_memory.end(), data + available, data + size);
+                    std::memcpy(m_vector.data() + m_write_position, data, available);
+                    m_vector.insert(m_vector.end(), data + available, data + size);
                     m_write_position += size;
                     return size;
                 }
@@ -709,18 +717,163 @@ namespace accel
 
             void clear() 
             { 
-                m_memory.clear();
+                m_vector.clear();
                 m_write_position = 0;
             }
 
-            const byte_t* get_data() const { return m_memory.data(); }
-            byte_t* get_data() { return m_memory.data(); }
+            const byte_t* get_data() const { return m_vector.data(); }
+            byte_t* get_data() { return m_vector.data(); }
 
-            std::size_t get_size() const { return m_memory.size(); }
+            std::size_t get_size() const { return m_vector.size(); }
 
         private:
+            std::vector<byte_t> m_vector;
             std::size_t m_write_position;
-            std::vector<byte_t> m_memory;
+        };
+
+        class vector_input_stream : public input_stream
+        {
+        public:
+            vector_input_stream(const std::vector<byte_t>& vector, std::size_t read_position = 0) :
+                m_read_position(read_position),
+                m_vector(vector) {}
+
+            vector_input_stream(std::vector<byte_t>&& vector, std::size_t read_position = 0) :
+                m_read_position(read_position),
+                m_vector(std::move(vector)) {}
+
+            ~vector_input_stream() = default;
+
+            ACC_DEFAULT_COPYABLE(vector_input_stream);
+            ACC_DEFAULT_MOVABLE(vector_input_stream);
+
+            void seek_read(std::size_t offset, seek_references reference) override
+            {
+                m_read_position = details::calculate_offset(m_vector.size(), m_read_position, offset, reference);
+            }
+
+            std::size_t get_read_position() const override
+            {
+                return m_read_position;
+            }
+
+            std::size_t read(byte_t* data, std::size_t size) override
+            {
+                std::size_t available = m_vector.size() - m_read_position;
+                std::size_t bytes_to_read = std::min(available, size); 
+                
+                std::memcpy(data, m_vector.data() + m_read_position, bytes_to_read);
+                m_read_position += bytes_to_read;
+                return bytes_to_read;
+            }
+
+            bool at_read_end() const override { return m_read_position == m_vector.size(); }
+
+            const byte_t* get_data() const { return m_vector.data(); }
+            byte_t* get_data() { return m_vector.data(); }
+
+            std::size_t get_size() const { return m_vector.size(); }
+
+        private:
+            std::vector<byte_t> m_vector;
+            std::size_t m_read_position;
+        };
+
+        class vector_stream : public input_output_stream
+        {
+        public:
+            vector_stream(std::size_t initial_capacity = 1024, std::size_t write_position = 0, std::size_t read_position = 0) :
+                m_write_position(write_position),
+                m_read_position(read_position)
+            {
+                m_vector.reserve(initial_capacity);
+            }
+
+            vector_stream(const std::vector<byte_t>& vector, std::size_t write_position = 0, std::size_t read_position = 0) :
+                m_write_position(write_position),
+                m_read_position(read_position),
+                m_vector(vector) {}
+
+            vector_stream(std::vector<byte_t>&& vector, std::size_t write_position = 0, std::size_t read_position = 0) :
+                m_write_position(write_position),
+                m_read_position(read_position),
+                m_vector(std::move(vector)) {}
+
+            ~vector_stream() = default;
+
+            ACC_DEFAULT_COPYABLE(vector_stream);
+            ACC_DEFAULT_MOVABLE(vector_stream);
+
+            void seek_read(std::size_t offset, seek_references reference) override
+            {
+                m_read_position = details::calculate_offset(m_vector.size(), m_read_position, offset, reference);
+            }
+
+            std::size_t get_read_position() const override
+            {
+                return m_read_position;
+            }
+
+            std::size_t read(byte_t* data, std::size_t size) override
+            {
+                std::size_t available = m_vector.size() - m_read_position;
+                std::size_t bytes_to_read = std::min(available, size); 
+                
+                std::memcpy(data, m_vector.data() + m_read_position, bytes_to_read);
+                m_read_position += bytes_to_read;
+                return bytes_to_read;
+            }
+
+            bool at_read_end() const override { return m_read_position == m_vector.size(); }
+
+            void seek_write(std::size_t offset, seek_references reference) override
+            {
+                m_write_position = details::calculate_offset(m_vector.size(), m_write_position, offset, reference);
+            }
+
+            std::size_t get_write_position() const override
+            {
+                return m_write_position;
+            }
+
+            std::size_t write(const byte_t* data, std::size_t size) override
+            {
+                std::size_t available = m_vector.size() - m_write_position;
+                if (size <= available) 
+                {
+                    std::memcpy(m_vector.data() + m_write_position, data, size);
+                    m_write_position += size;
+                    return size;
+                } 
+                else 
+                {
+                    std::memcpy(m_vector.data() + m_write_position, data, available);
+                    m_vector.insert(m_vector.end(), data + available, data + size);
+                    m_write_position += size;
+                    return size;
+                }
+            }
+
+            bool at_write_end() const override { return false; }
+
+            void flush() override {}
+
+            void clear() 
+            { 
+                m_vector.clear();
+                m_write_position = 0;
+                m_read_position = 0;
+            }
+
+            const byte_t* get_data() const { return m_vector.data(); }
+            byte_t* get_data() { return m_vector.data(); }
+
+            std::size_t get_size() const { return m_vector.size(); }
+
+        private:
+            std::vector<byte_t> m_vector;
+            std::size_t m_read_position;
+            std::size_t m_write_position;
         };
     }
 }

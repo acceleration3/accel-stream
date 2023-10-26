@@ -67,7 +67,7 @@ int main(int argc, char* argv[])
 	{
 		std::uint16_t a = 0x0001;
 		std::uint16_t b = 0x0002;
-		stream::dynamic_output_stream stream;
+		stream::vector_stream stream;
 		stream.write_object_be(a);
 		stream.write_object_be(b);
 		auto data = stream.get_data();
