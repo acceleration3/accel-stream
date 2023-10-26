@@ -164,6 +164,7 @@ namespace accel
             virtual std::size_t get_write_position() const = 0;
             virtual std::size_t write(const byte_t* data, std::size_t size) = 0;
             virtual bool at_write_end() const = 0;
+            virtual void flush() = 0;
 
             template<typename T>
             output_stream& operator<<(const T& data)
@@ -203,7 +204,7 @@ namespace accel
             output_stream() = default;
         };
 
-        class stream : public input_stream, public output_stream {};
+        class input_output_stream : public input_stream, public output_stream {};
 
         class file_input_stream : public input_stream
         {
@@ -322,11 +323,16 @@ namespace accel
                 return feof(m_file);
             }
 
+            void flush() override
+            {
+                fflush(m_file);
+            }
+
         private:
             FILE* m_file;
         };
     
-        class file_stream : public stream
+        class file_stream : public input_output_stream
         {
         public:
             file_stream() = default;
@@ -402,6 +408,11 @@ namespace accel
             std::size_t write(const byte_t* data, std::size_t size) override
             {
                 return fwrite(data, 1, size, m_file);
+            }
+
+            void flush() override
+            {
+                fflush(m_file);
             }
 
         private:
@@ -565,6 +576,8 @@ namespace accel
                 return m_write_position == m_size;
             }
 
+            void flush() override {}
+
             std::size_t get_size() const { return m_size; }
             byte_t* get_data() { return m_data; }
 
@@ -574,7 +587,7 @@ namespace accel
             std::size_t m_write_position;
         };
 
-        class memory_stream : public stream
+        class memory_stream : public input_output_stream
         {
         public:
             template<typename DataT, std::size_t Size>
@@ -636,6 +649,8 @@ namespace accel
                 return m_output_stream.write(data, size);
             }
 
+            void flush() override {}
+
             const byte_t* data() const { return m_input_stream.get_data(); }
             byte_t* data() { return m_output_stream.get_data(); }
 
@@ -689,6 +704,8 @@ namespace accel
             }
 
             bool at_write_end() const override { return false; }
+
+            void flush() override {}
 
             const byte_t* get_data() const { return m_memory.data(); }
             byte_t* get_data() { return m_memory.data(); }
