@@ -707,6 +707,12 @@ namespace accel
 
             void flush() override {}
 
+            void clear() 
+            { 
+                m_memory.clear();
+                m_write_position = 0;
+            }
+
             const byte_t* get_data() const { return m_memory.data(); }
             byte_t* get_data() { return m_memory.data(); }
 
