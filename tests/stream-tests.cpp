@@ -1,44 +1,23 @@
 #include <accel/stream>
 
 #include <iostream>
-#include <cassert>
-#include <string>
 
 using namespace accel;
 
 int main(int argc, char* argv[])
 {
 	{
-		stream::file_output_stream stream("test.bin", stream::file_modes::binary);
-		for (std::size_t i = 0; i < 30; i++)
-			stream << 3;
-	}
-
-	{
-		stream::file_input_stream stream("test.bin", stream::file_modes::binary);
-
-		for (std::size_t i = 0; i < 30; i++)
-		{
-			int value = 0;
-			stream >> value;
-			ACC_ASSERT(value == 3);			
-		}
-	}
-
-	{
 		char test[4] = { 0x01, 0x00, 0x03, 0x00 };
 		stream::memory_input_stream stream(test);
 
-		std::uint16_t a = 0;
-		std::uint16_t b = 0;
-		stream.read_object_le(a);
-		stream.read_object_le(b);
+		std::uint16_t a = stream.read_object_le();
+		std::uint16_t b = stream.read_object_le();
 		ACC_ASSERT(a == 1);
 		ACC_ASSERT(b == 3);
 	}
 
 	{
-		char test[6];
+		std::uint8_t test[6];
 		stream::memory_output_stream stream(test);
 
 		std::uint16_t a = 0x0001;

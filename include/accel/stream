@@ -4,11 +4,7 @@
 #include <vector>
 #include <stdexcept>
 
-#include <cstdint>
 #include <cstring>
-
-#define _FILE_OFFSET_BITS 64
-#include <cstdio>
 
 #include <accel/endianess>
 #include <accel/macros>
@@ -19,19 +15,13 @@ namespace accel
     using byte_t = BYTE_TYPE;
     
     namespace stream
-    {    
+    {   
         enum class seek_references
 	    {
 		    begining,
 		    current,
 		    end
 	    };
-
-        enum class file_modes
-        {
-            text,
-            binary
-        };
 
         namespace details
         {
@@ -60,33 +50,6 @@ namespace accel
 
                 return new_offset;
             }
-        
-            static inline FILE* fopen_utf8(const utf8::string& path, const utf8::string& mode)
-            {
-#if defined(PLATFORM_WINDOWS)
-                return _wfopen(path.to_wstring().c_str(), mode.to_wstring().c_str());
-#else
-                return fopen(path.to_string().c_str(), mode.to_string().c_str());
-#endif
-            }
-
-            static inline std::size_t ftell_64(FILE* file)
-            {
-#if defined(COMPILER_MSVC)
-                return _ftelli64(file);
-#else
-                return ftello64(file);
-#endif
-            }
-
-            static inline std::size_t fseek_64(FILE* file, std::size_t offset, int origin)
-            {
-#if defined(COMPILER_MSVC)
-                return _fseeki64(file, offset, origin);
-#else
-                return fseeko64(file, offset, origin);
-#endif
-            }
         }
 
         class input_stream
@@ -98,13 +61,6 @@ namespace accel
             virtual std::size_t get_read_position() const = 0;
             virtual std::size_t read(byte_t* data, std::size_t size) = 0;
             virtual bool at_read_end() const = 0;
-
-            template<typename T>
-            input_stream& operator>>(T& data)
-            {
-                read(reinterpret_cast<byte_t*>(&data), sizeof(T));
-                return *this;
-            }
 
             template<endianess::endianesses Endianess = endianess::endianesses::host_endian, typename T>
             std::size_t read_object(T& object)
@@ -128,21 +84,9 @@ namespace accel
             }
 
             template<typename T>
-            std::size_t read_object_le(T& object)
-            {
-                return read_object<endianess::endianesses::little_endian>(object);
-            }
-
-            template<typename T>
             T read_object_le()
             {
                 return read_object<endianess::endianesses::little_endian, T>();
-            }
-
-            template<typename T>
-            std::size_t read_object_be(T& object)
-            {
-                return read_object<endianess::endianesses::big_endian>(object);
             }
 
             template<typename T>
@@ -205,220 +149,7 @@ namespace accel
         };
 
         class input_output_stream : public input_stream, public output_stream {};
-
-        class file_input_stream : public input_stream
-        {
-        public:
-            file_input_stream() = default;
-
-            file_input_stream(const utf8::string& path, file_modes mode)
-            {
-                m_file = details::fopen_utf8(path, mode == file_modes::binary ? "rb" : "rt");
-                if (!m_file)
-                    throw std::runtime_error("Failed to open file.");
-            }
-            
-            ~file_input_stream()
-            {
-                if (m_file)
-                    fclose(m_file);
-            }
-
-            ACC_NON_COPYABLE(file_input_stream);
-            
-            file_input_stream(file_input_stream&& other)
-            {
-                m_file = other.m_file;
-                other.m_file = nullptr;
-            }
-
-            file_input_stream& operator=(file_input_stream&& other)
-            {
-                m_file = other.m_file;
-                other.m_file = nullptr;
-                return *this;
-            }
-
-            void seek_read(std::size_t offset, seek_references reference) override
-            {
-                int whence = static_cast<int>(reference);
-                if (details::fseek_64(m_file, offset, whence) != 0)
-                    throw std::runtime_error("Failed to seek file");
-            }
-
-            std::size_t get_read_position() const override
-            {
-                return details::ftell_64(m_file);
-            }
-
-            std::size_t read(byte_t* data, std::size_t size) override
-            {
-                std::ptrdiff_t read = fread(data, 1, size, m_file);
-                if (read < 0)
-                    throw std::runtime_error("Failed to read file");
-                return read;
-            }
-
-            bool at_read_end() const override
-            {
-                return feof(m_file);
-            }
-
-        private:
-            FILE* m_file;
-        };
-
-        class file_output_stream : public output_stream
-        {
-        public:
-            file_output_stream() = default;
-
-            file_output_stream(const utf8::string& path, file_modes mode)
-            {
-                m_file = details::fopen_utf8(path, mode == file_modes::binary ? "wb" : "wt");
-                if (!m_file)
-                    throw std::runtime_error("Failed to open file.");
-            }
-            
-            ~file_output_stream()
-            {
-                if (m_file)
-                    fclose(m_file);
-            }
-
-            ACC_NON_COPYABLE(file_output_stream);
-
-            file_output_stream(file_output_stream&& other)
-            {
-                m_file = other.m_file;
-                other.m_file = nullptr;
-            }
-
-            file_output_stream& operator=(file_output_stream&& other)
-            {
-                m_file = other.m_file;
-                other.m_file = nullptr;
-                return *this;
-            }
-
-            void seek_write(std::size_t offset, seek_references reference) override
-            {
-                int whence = static_cast<int>(reference);
-                if (details::fseek_64(m_file, offset, whence) != 0)
-                    throw std::runtime_error("Failed to seek file");
-            }
-
-            std::size_t get_write_position() const override
-            {
-                return details::ftell_64(m_file);
-            }
-
-            std::size_t write(const byte_t* data, std::size_t size) override
-            {
-                return fwrite(data, 1, size, m_file);
-            }
-
-            bool at_write_end() const override
-            {
-                return feof(m_file);
-            }
-
-            void flush() override
-            {
-                fflush(m_file);
-            }
-
-        private:
-            FILE* m_file;
-        };
-    
-        class file_stream : public input_output_stream
-        {
-        public:
-            file_stream() = default;
-
-            file_stream(const utf8::string& path, file_modes mode)
-            {
-                fclose(details::fopen_utf8(path, "a+"));
-                m_file = details::fopen_utf8(path, mode == file_modes::binary ? "r+b" : "r+t");
-                if (!m_file)
-                    throw std::runtime_error("Failed to open file.");
-            }
-
-            ~file_stream()
-            {
-                if (m_file)
-                    fclose(m_file);
-            }
-
-            ACC_NON_COPYABLE(file_stream);
-            
-            file_stream(file_stream&& other)
-            {
-                m_file = other.m_file;
-                other.m_file = nullptr;
-            }
-
-            file_stream& operator=(file_stream&& other)
-            {
-                m_file = other.m_file;
-                other.m_file = nullptr;
-                return *this;
-            }
-
-            void seek_read(std::size_t offset, seek_references reference) override
-            {
-                int whence = static_cast<int>(reference);
-                if (details::fseek_64(m_file, offset, whence) != 0)
-                    throw std::runtime_error("Failed to seek file");
-            }
-
-            std::size_t get_read_position() const override
-            {
-                return details::ftell_64(m_file);
-            }
-
-            std::size_t read(byte_t* data, std::size_t size) override
-            {
-                return fread(data, 1, size, m_file);
-            }
-
-            bool at_read_end() const override
-            {
-                return feof(m_file);
-            }
-
-            bool at_write_end() const override
-            {
-                return feof(m_file);
-            }
-
-            void seek_write(std::size_t offset, seek_references reference) override
-            {
-                int whence = static_cast<int>(reference);
-                if (details::fseek_64(m_file, offset, whence) != 0)
-                    throw std::runtime_error("Failed to seek file");
-            }
-
-            std::size_t get_write_position() const override
-            {
-                return details::ftell_64(m_file);
-            }
-
-            std::size_t write(const byte_t* data, std::size_t size) override
-            {
-                return fwrite(data, 1, size, m_file);
-            }
-
-            void flush() override
-            {
-                fflush(m_file);
-            }
-
-        private:
-            FILE* m_file;
-        };
-
+        
         class memory_input_stream : public input_stream
         {
         public:
