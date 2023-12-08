@@ -66,9 +66,8 @@ namespace accel
             std::size_t read_object(T& object)
             {
                 auto size = read(reinterpret_cast<byte_t*>(&object), sizeof(T));
-                if (size != sizeof(T))
-                    return 0;
-                endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(object);
+                if (size == sizeof(T))
+                    endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(object);
                 return size;
             }
 
@@ -125,13 +124,6 @@ namespace accel
                 return write(reinterpret_cast<const byte_t*>(&temp), sizeof(temp));
             }
 
-            template<endianess::endianesses Endianess, typename T>
-            std::size_t write_object(T&& object)
-            {
-                endianess::swap_endianess<endianess::endianesses::host_endian, Endianess>(object);
-                return write(reinterpret_cast<const byte_t*>(&object), sizeof(object));
-            }
-
             template<typename T>
             std::size_t write_object_be(const T& object)
             {
@@ -139,9 +131,9 @@ namespace accel
             }
 
             template<typename T>
-            std::size_t write_object_le(T&& object)
+            std::size_t write_object_le(const T& object)
             {
-                return write_object<endianess::endianesses::little_endian>(std::forward<T>(object));
+                return write_object<endianess::endianesses::little_endian>(object);
             }
 
         protected:

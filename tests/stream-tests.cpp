@@ -10,8 +10,8 @@ int main(int argc, char* argv[])
 		char test[4] = { 0x01, 0x00, 0x03, 0x00 };
 		stream::memory_input_stream stream(test);
 
-		std::uint16_t a = stream.read_object_le();
-		std::uint16_t b = stream.read_object_le();
+		auto a = stream.read_object_le<std::uint16_t>();
+		auto b = stream.read_object_le<std::uint16_t>();
 		ACC_ASSERT(a == 1);
 		ACC_ASSERT(b == 3);
 	}
